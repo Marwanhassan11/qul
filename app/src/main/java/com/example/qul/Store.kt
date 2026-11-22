@@ -24,6 +24,11 @@ object Store {
         return fresh.size
     }
 
+    @Synchronized fun put(c: Context, t: Txn) {
+        val l = all(c)
+        save(c, if (l.any { it.id == t.id }) l.map { if (it.id == t.id) t else it } else l + t)
+    }
+
     @Synchronized fun remove(c: Context, id: String) = save(c, all(c).filter { it.id != id })
 
     private fun save(c: Context, l: List<Txn>) {
