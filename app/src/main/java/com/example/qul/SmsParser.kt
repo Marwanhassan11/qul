@@ -1,7 +1,8 @@
 package com.example.qul
 
 data class Txn(val id: String, val amount: Double, val income: Boolean,
-               val merchant: String, val time: Long, val raw: String)
+               val merchant: String, val time: Long, val raw: String,
+               val cat: String = "other")
 
 object SmsParser {
     private val I = RegexOption.IGNORE_CASE
@@ -36,6 +37,7 @@ object SmsParser {
             .takeWhile { it.lowercase().trimEnd(':') !in stop }
             .joinToString(" ").trim(' ', ':', '-', '.')
             .ifEmpty { "بنك" }
-        return Txn("$time-${body.hashCode()}", amount, inc && !exp, merchant, time, body)
+        val isIncome = inc && !exp
+        return Txn("$time-${body.hashCode()}", amount, isIncome, merchant, time, body, Cats.guess(merchant, isIncome))
     }
 }

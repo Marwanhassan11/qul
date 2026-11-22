@@ -11,6 +11,7 @@ class SmsReceiver : BroadcastReceiver() {
         val msgs = Telephony.Sms.Intents.getMessagesFromIntent(i)
         if (msgs.isNullOrEmpty()) return
         val body = msgs.joinToString("") { it.messageBody ?: "" }
-        SmsParser.parse(body, System.currentTimeMillis())?.let { Store.addAll(c, listOf(it)) }
+        val t = if (msgs[0].timestampMillis > 0) msgs[0].timestampMillis else System.currentTimeMillis()
+        SmsParser.parse(body, t)?.let { Store.addAll(c, listOf(it)) }
     }
 }

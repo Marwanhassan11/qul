@@ -1,386 +1,460 @@
+@file:OptIn(ExperimentalMaterial3Api::class)
+
 package com.example.qul
 
 import android.Manifest
-import android.app.Activity
-import android.app.AlertDialog
 import android.app.DatePickerDialog
 import android.content.Context
-import android.content.Intent
 import android.content.pm.PackageManager
-import android.graphics.Canvas
-import android.graphics.Color
-import android.graphics.Paint
-import android.graphics.Typeface
-import android.graphics.pdf.PdfDocument
 import android.os.Bundle
 import android.provider.Telephony
-import android.text.InputType
-import android.view.View
-import android.view.ViewGroup
-import android.widget.*
-import java.io.ByteArrayOutputStream
+import android.widget.Toast
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import java.text.SimpleDateFormat
-import java.util.*
+import java.util.Calendar
+import java.util.Date
+import java.util.Locale
+import java.util.UUID
 
-private const val GREEN = 0xFF0B6E6E.toInt()
-private const val RED = 0xFFB42318.toInt()
+private val GREEN = Color(0xFF0B6E6E)
+private val RED = Color(0xFFB42318)
 
-class MainActivity : Activity() {
-    private val df = SimpleDateFormat("yyyy/MM/dd", Locale.US)
-    private var from = monthStart()
-    private var to = dayEnd(System.currentTimeMillis())
-    private var shown: List<Txn> = emptyList()
-    private var pendingPdf: ByteArray? = null
-
-    private lateinit var list: ListView
-    private lateinit var adp: Adp
-    private lateinit var btnFrom: Button
-    private lateinit var btnTo: Button
-    private lateinit var tvIn: TextView
-    private lateinit var tvOut: TextView
-    private lateinit var tvNet: TextView
-    private lateinit var bars: BarsView
-    private lateinit var top: TopView
-
-    private fun dp(n: Int) = (n * resources.displayMetrics.density).toInt()
-    private fun toast(s: String) = Toast.makeText(this, s, Toast.LENGTH_SHORT).show()
-
-    private fun dayStart(t: Long): Long {
-        val c = Calendar.getInstance()
-        c.timeInMillis = t
-        c.set(Calendar.HOUR_OF_DAY, 0); c.set(Calendar.MINUTE, 0)
-        c.set(Calendar.SECOND, 0); c.set(Calendar.MILLISECOND, 0)
-        return c.timeInMillis
-    }
-    private fun dayEnd(t: Long) = dayStart(t) + 24L * 3600 * 1000 - 1
-    private fun monthStart(): Long {
-        val c = Calendar.getInstance()
-        c.set(Calendar.DAY_OF_MONTH, 1)
-        return dayStart(c.timeInMillis)
-    }
-
-    private fun btn(label: String, onClick: () -> Unit): Button {
-        val b = Button(this)
-        b.text = label
-        b.textSize = 13f
-        b.setOnClickListener { onClick() }
-        return b
-    }
-    private fun row(vararg v: View): LinearLayout {
-        val r = LinearLayout(this)
-        r.orientation = LinearLayout.HORIZONTAL
-        v.forEach { r.addView(it, LinearLayout.LayoutParams(0, -2, 1f)) }
-        return r
-    }
-    private fun card(color: Int): TextView {
-        val t = TextView(this)
-        t.setPadding(dp(12), dp(10), dp(12), dp(10))
-        t.textSize = 16f
-        t.setTextColor(color)
-        t.setBackgroundColor(0x1A808080)
-        return t
-    }
-    private fun label(s: String): TextView {
-        val t = TextView(this)
-        t.text = s
-        t.textSize = 15f
-        t.setTypeface(null, Typeface.BOLD)
-        t.setPadding(0, dp(12), 0, dp(4))
-        return t
-    }
-
+class MainActivity : ComponentActivity() {
     override fun onCreate(b: Bundle?) {
         super.onCreate(b)
-        val header = LinearLayout(this)
-        header.orientation = LinearLayout.VERTICAL
-        header.layoutDirection = View.LAYOUT_DIRECTION_RTL
-        header.setPadding(dp(12), dp(28), dp(12), dp(8))
-
-        val title = TextView(this)
-        title.text = "قُل"
-        title.textSize = 26f
-        title.setTypeface(null, Typeface.BOLD)
-        header.addView(title)
-
-        btnFrom = btn("") { pickDate(from) { from = dayStart(it); refresh() } }
-        btnTo = btn("") { pickDate(to) { to = dayEnd(it); refresh() } }
-        header.addView(row(btnFrom, btnTo))
-        header.addView(row(
-            btn("هذا الشهر") { from = monthStart(); to = dayEnd(System.currentTimeMillis()); refresh() },
-            btn("آخر 30 يوم") {
-                val now = System.currentTimeMillis()
-                from = dayStart(now - 29L * 24 * 3600 * 1000); to = dayEnd(now); refresh()
-            },
-            btn("الكل") {
-                val all = Store.all(this)
-                val now = System.currentTimeMillis()
-                from = dayStart(all.minOfOrNull { it.time } ?: now)
-                to = dayEnd(maxOf(now, all.maxOfOrNull { it.time } ?: now))
-                refresh()
+        setContent {
+            QulTheme {
+                CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) { App() }
             }
-        ))
-
-        tvIn = card(GREEN); tvOut = card(RED); tvNet = card(Color.DKGRAY)
-        header.addView(label("ملخص الفترة"))
-        header.addView(row(tvIn, tvOut))
-        header.addView(tvNet)
-
-        header.addView(label("الدخل مقابل المصروف"))
-        bars = BarsView(this)
-        header.addView(bars, LinearLayout.LayoutParams(-1, 420))
-        header.addView(label("أعلى المصروفات"))
-        top = TopView(this)
-        header.addView(top, LinearLayout.LayoutParams(-1, 400))
-
-        header.addView(row(
-            btn("➕ إضافة عملية") { txnDialog(null) },
-            btn("📄 تصدير PDF") { exportPdf() },
-            btn("📥 استيراد الرسائل") { ensurePerm { importOld() } }
-        ))
-        header.addView(label("العمليات (اضغط على عملية للتعديل أو الحذف)"))
-
-        list = ListView(this)
-        list.layoutDirection = View.LAYOUT_DIRECTION_RTL
-        list.addHeaderView(header, null, false)
-        adp = Adp()
-        list.adapter = adp
-        list.setOnItemClickListener { _, _, pos, _ ->
-            val i = pos - list.headerViewsCount
-            if (i in shown.indices) txnDialog(shown[i])
-        }
-        setContentView(list)
-        ensurePerm { }
-    }
-
-    override fun onResume() { super.onResume(); refresh() }
-
-    private fun refresh() {
-        val all = Store.all(this)
-        shown = all.filter { it.time in from..to }
-        val inc = shown.filter { it.income }.sumOf { it.amount }
-        val out = shown.filter { !it.income }.sumOf { it.amount }
-        tvIn.text = "الدخل\n" + "%,.2f".format(inc)
-        tvOut.text = "المصروف\n" + "%,.2f".format(out)
-        tvNet.text = "الصافي: " + "%,.2f".format(inc - out)
-        bars.inc = inc; bars.out = out; bars.invalidate()
-        top.update(shown.filter { !it.income }.groupBy { it.merchant }
-            .map { Pair(it.key, it.value.sumOf { x -> x.amount }) }
-            .sortedByDescending { it.second }.take(5))
-        btnFrom.text = "من: " + df.format(Date(from))
-        btnTo.text = "إلى: " + df.format(Date(to))
-        adp.notifyDataSetChanged()
-    }
-
-    private inner class Adp : BaseAdapter() {
-        override fun getCount() = shown.size
-        override fun getItem(i: Int) = shown[i]
-        override fun getItemId(i: Int) = i.toLong()
-        override fun getView(i: Int, v: View?, p: ViewGroup?): View {
-            val t = shown[i]
-            val tv = (v as? TextView) ?: TextView(this@MainActivity).also {
-                it.setPadding(dp(16), dp(10), dp(16), dp(10)); it.textSize = 16f
-            }
-            val amt = "%,.2f".format(t.amount)
-            tv.text = (if (t.income) "+" else "-") + amt + "   " + t.merchant + "\n" + df.format(Date(t.time))
-            tv.setTextColor(if (t.income) GREEN else RED)
-            return tv
         }
     }
+}
 
-    private fun pickDate(initial: Long, cb: (Long) -> Unit) {
-        val c = Calendar.getInstance()
-        c.timeInMillis = initial
-        DatePickerDialog(this, { _, y, m, d ->
-            val r = Calendar.getInstance()
-            r.set(y, m, d, 12, 0, 0); r.set(Calendar.MILLISECOND, 0)
-            cb(r.timeInMillis)
-        }, c.get(Calendar.YEAR), c.get(Calendar.MONTH), c.get(Calendar.DAY_OF_MONTH)).show()
-    }
+@Composable
+fun QulTheme(content: @Composable () -> Unit) {
+    val scheme = if (isSystemInDarkTheme()) darkColorScheme(
+        primary = Color(0xFF3FC1B8), onPrimary = Color(0xFF00201E),
+        primaryContainer = Color(0xFF14313A), onPrimaryContainer = Color(0xFFD5EEEC),
+        background = Color(0xFF0E1720), surface = Color(0xFF16222E),
+        surfaceVariant = Color(0xFF263544)
+    ) else lightColorScheme(
+        primary = GREEN, onPrimary = Color.White,
+        primaryContainer = Color(0xFFD5EEEC), onPrimaryContainer = Color(0xFF00201E),
+        background = Color(0xFFF3F6F6), surface = Color.White,
+        surfaceVariant = Color(0xFFE6EDED)
+    )
+    MaterialTheme(colorScheme = scheme, content = content)
+}
 
-    private fun txnDialog(ex: Txn?) {
-        val box = LinearLayout(this)
-        box.orientation = LinearLayout.VERTICAL
-        box.layoutDirection = View.LAYOUT_DIRECTION_RTL
-        box.setPadding(dp(20), dp(8), dp(20), 0)
-        val name = EditText(this)
-        name.hint = "اسم العملية"
-        name.setText(ex?.merchant ?: "")
-        val amt = EditText(this)
-        amt.hint = "المبلغ"
-        amt.inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
-        if (ex != null) amt.setText(ex.amount.toString())
-        val rg = RadioGroup(this)
-        rg.orientation = RadioGroup.HORIZONTAL
-        val rOut = RadioButton(this); rOut.text = "مصروف"; rOut.id = 1001
-        val rIn = RadioButton(this); rIn.text = "دخل"; rIn.id = 1002
-        rg.addView(rOut); rg.addView(rIn)
-        rg.check(if (ex?.income == true) 1002 else 1001)
-        var time = ex?.time ?: System.currentTimeMillis()
-        val dateBtn = Button(this)
-        dateBtn.text = "التاريخ: " + df.format(Date(time))
-        dateBtn.setOnClickListener {
-            pickDate(time) { time = it; dateBtn.text = "التاريخ: " + df.format(Date(time)) }
+fun dayStart(t: Long): Long {
+    val c = Calendar.getInstance()
+    c.timeInMillis = t
+    c.set(Calendar.HOUR_OF_DAY, 0); c.set(Calendar.MINUTE, 0)
+    c.set(Calendar.SECOND, 0); c.set(Calendar.MILLISECOND, 0)
+    return c.timeInMillis
+}
+fun dayEnd(t: Long) = dayStart(t) + 24L * 3600 * 1000 - 1
+fun monthStart(t: Long): Long {
+    val c = Calendar.getInstance()
+    c.timeInMillis = t
+    c.set(Calendar.DAY_OF_MONTH, 1)
+    return dayStart(c.timeInMillis)
+}
+fun shiftMonth(t: Long, by: Int): Long {
+    val c = Calendar.getInstance()
+    c.timeInMillis = monthStart(t)
+    c.add(Calendar.MONTH, by)
+    return c.timeInMillis
+}
+fun monthEnd(t: Long): Long = shiftMonth(t, 1) - 1
+
+fun money(d: Double): String = "%,.2f".format(Locale.US, d)
+fun toast(c: Context, s: String) = Toast.makeText(c, s, Toast.LENGTH_SHORT).show()
+
+fun pick(ctx: Context, initial: Long, cb: (Long) -> Unit) {
+    val c = Calendar.getInstance()
+    c.timeInMillis = initial
+    DatePickerDialog(ctx, { _, y, m, d ->
+        val r = Calendar.getInstance()
+        r.set(y, m, d, 12, 0, 0); r.set(Calendar.MILLISECOND, 0)
+        cb(r.timeInMillis)
+    }, c.get(Calendar.YEAR), c.get(Calendar.MONTH), c.get(Calendar.DAY_OF_MONTH)).show()
+}
+
+fun importSms(ctx: Context): Int {
+    val since = System.currentTimeMillis() - 90L * 24 * 3600 * 1000
+    val found = mutableListOf<Txn>()
+    ctx.contentResolver.query(
+        Telephony.Sms.Inbox.CONTENT_URI,
+        arrayOf(Telephony.Sms.BODY, Telephony.Sms.DATE),
+        Telephony.Sms.DATE + " > ?", arrayOf(since.toString()), null
+    )?.use { cur ->
+        while (cur.moveToNext()) {
+            SmsParser.parse(cur.getString(0) ?: "", cur.getLong(1))?.let { found.add(it) }
         }
-        box.addView(name); box.addView(amt); box.addView(rg); box.addView(dateBtn)
+    }
+    return Store.addAll(ctx, found)
+}
 
-        val dlg = AlertDialog.Builder(this)
-            .setTitle(if (ex == null) "إضافة عملية" else "تعديل العملية")
-            .setView(box)
-            .setPositiveButton("حفظ") { _, _ ->
-                val a = amt.text.toString().toDoubleOrNull()
-                if (a == null || a <= 0) {
-                    toast("المبلغ غير صحيح")
-                } else {
-                    val n = name.text.toString().trim().ifEmpty { "بدون اسم" }
-                    val id = ex?.id ?: ("m-" + UUID.randomUUID())
-                    Store.put(this, Txn(id, a, rg.checkedRadioButtonId == 1002, n, time, ex?.raw ?: ""))
-                    refresh()
+@Composable
+fun App() {
+    val ctx = LocalContext.current
+    var tab by remember { mutableIntStateOf(0) }
+    var ver by remember { mutableIntStateOf(0) }
+    val now = System.currentTimeMillis()
+    var from by remember { mutableLongStateOf(monthStart(now)) }
+    var to by remember { mutableLongStateOf(monthEnd(now)) }
+    var edit by remember { mutableStateOf<Txn?>(null) }
+    var showForm by remember { mutableStateOf(false) }
+    var pdfBytes by remember { mutableStateOf<ByteArray?>(null) }
+    val reload: () -> Unit = { ver++ }
+
+    val all = remember(ver) { Store.all(ctx) }
+    val shown = remember(all, from, to) { all.filter { it.time in from..to } }
+
+    val perms = arrayOf(Manifest.permission.RECEIVE_SMS, Manifest.permission.READ_SMS)
+    val permLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { r ->
+        if (r.values.all { it }) {
+            toast(ctx, "تمت إضافة " + importSms(ctx) + " عملية")
+            reload()
+        }
+    }
+    val pdfLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) { uri ->
+        val bytes = pdfBytes
+        if (uri != null && bytes != null) {
+            try {
+                ctx.contentResolver.openOutputStream(uri)?.use { it.write(bytes) }
+                toast(ctx, "تم حفظ ملف PDF")
+            } catch (e: Exception) { toast(ctx, "تعذر حفظ الملف") }
+        }
+    }
+    fun granted() = perms.all { ctx.checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED }
+    fun startImport() {
+        if (granted()) { toast(ctx, "تمت إضافة " + importSms(ctx) + " عملية"); reload() }
+        else permLauncher.launch(perms)
+    }
+    LaunchedEffect(Unit) { if (!granted()) permLauncher.launch(perms) }
+
+    Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
+        bottomBar = {
+            NavigationBar {
+                listOf("🏠" to "الرئيسية", "🧾" to "العمليات", "⚙️" to "المزيد").forEachIndexed { i, (ic, lb) ->
+                    NavigationBarItem(
+                        selected = tab == i, onClick = { tab = i },
+                        icon = { Text(ic, fontSize = 20.sp) }, label = { Text(lb) }
+                    )
                 }
             }
-            .setNegativeButton("إلغاء", null)
-        if (ex != null) dlg.setNeutralButton("حذف") { _, _ -> Store.remove(this, ex.id); refresh() }
-        dlg.show()
-    }
-
-    private fun exportPdf() {
-        if (shown.isEmpty()) { toast("لا توجد عمليات في هذه الفترة"); return }
-        pendingPdf = buildPdf()
-        val i = Intent(Intent.ACTION_CREATE_DOCUMENT)
-        i.addCategory(Intent.CATEGORY_OPENABLE)
-        i.type = "application/pdf"
-        i.putExtra(Intent.EXTRA_TITLE, "qul-report.pdf")
-        startActivityForResult(i, 2)
-    }
-
-    override fun onActivityResult(req: Int, res: Int, data: Intent?) {
-        super.onActivityResult(req, res, data)
-        val uri = data?.data
-        val bytes = pendingPdf
-        if (req == 2 && res == RESULT_OK && uri != null && bytes != null) {
-            try {
-                contentResolver.openOutputStream(uri)?.use { it.write(bytes) }
-                toast("تم حفظ ملف PDF")
-            } catch (e: Exception) { toast("تعذر حفظ الملف") }
+        },
+        floatingActionButton = {
+            FloatingActionButton(onClick = { edit = null; showForm = true }) { Text("＋", fontSize = 26.sp) }
         }
-    }
-
-    private fun buildPdf(): ByteArray {
-        val W = 595; val H = 842; val R = W - 40f; val L = 40f
-        val doc = PdfDocument()
-        val p = Paint(Paint.ANTI_ALIAS_FLAG)
-        var pageNo = 1
-        var page = doc.startPage(PdfDocument.PageInfo.Builder(W, H, pageNo).create())
-        var cv = page.canvas
-        var y = 60f
-        fun t(s: String, x: Float, yy: Float, size: Float, al: Paint.Align, col: Int = Color.BLACK, bold: Boolean = false) {
-            p.textSize = size; p.textAlign = al; p.color = col; p.isFakeBoldText = bold
-            cv.drawText(s, x, yy, p)
-        }
-        fun header() {
-            t("التاريخ", R, y, 12f, Paint.Align.RIGHT, Color.DKGRAY, true)
-            t("الاسم", R - 90f, y, 12f, Paint.Align.RIGHT, Color.DKGRAY, true)
-            t("النوع", 170f, y, 12f, Paint.Align.RIGHT, Color.DKGRAY, true)
-            t("المبلغ", L, y, 12f, Paint.Align.LEFT, Color.DKGRAY, true)
-            p.color = Color.GRAY
-            cv.drawLine(L, y + 6f, R, y + 6f, p)
-            y += 26f
-        }
-        val inc = shown.filter { it.income }.sumOf { it.amount }
-        val out = shown.filter { !it.income }.sumOf { it.amount }
-        t("تقرير الإيرادات والمصروفات", R, y, 20f, Paint.Align.RIGHT, Color.BLACK, true); y += 28f
-        t("الفترة", R, y, 12f, Paint.Align.RIGHT)
-        t(df.format(Date(from)) + " - " + df.format(Date(to)), R - 50f, y, 12f, Paint.Align.RIGHT); y += 22f
-        t("إجمالي الدخل", R, y, 13f, Paint.Align.RIGHT)
-        t("%,.2f".format(inc), R - 110f, y, 13f, Paint.Align.RIGHT, GREEN, true); y += 20f
-        t("إجمالي المصروف", R, y, 13f, Paint.Align.RIGHT)
-        t("%,.2f".format(out), R - 110f, y, 13f, Paint.Align.RIGHT, RED, true); y += 20f
-        t("الصافي", R, y, 13f, Paint.Align.RIGHT)
-        t("%,.2f".format(inc - out), R - 110f, y, 13f, Paint.Align.RIGHT, Color.BLACK, true); y += 34f
-        header()
-        for (x in shown.sortedBy { it.time }) {
-            if (y > H - 50f) {
-                doc.finishPage(page); pageNo++
-                page = doc.startPage(PdfDocument.PageInfo.Builder(W, H, pageNo).create())
-                cv = page.canvas; y = 60f; header()
+    ) { pad ->
+        Column(Modifier.padding(pad)) {
+            if (tab != 2) {
+                FilterBar(from, to,
+                    onShift = { d -> from = shiftMonth(from, d); to = monthEnd(from) },
+                    onFrom = { pick(ctx, from) { from = dayStart(it) } },
+                    onTo = { pick(ctx, to) { to = dayEnd(it) } })
             }
-            t(df.format(Date(x.time)), R, y, 11f, Paint.Align.RIGHT)
-            t(x.merchant.take(34), R - 90f, y, 11f, Paint.Align.RIGHT)
-            t(if (x.income) "دخل" else "مصروف", 170f, y, 11f, Paint.Align.RIGHT)
-            t((if (x.income) "+" else "-") + "%,.2f".format(x.amount), L, y, 11f, Paint.Align.LEFT, if (x.income) GREEN else RED)
-            y += 20f
-        }
-        doc.finishPage(page)
-        val os = ByteArrayOutputStream()
-        doc.writeTo(os)
-        doc.close()
-        return os.toByteArray()
-    }
-
-    private fun ensurePerm(then: () -> Unit) {
-        val p = arrayOf(Manifest.permission.RECEIVE_SMS, Manifest.permission.READ_SMS)
-        if (p.all { checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED }) then()
-        else requestPermissions(p, 1)
-    }
-
-    private fun importOld() {
-        val since = System.currentTimeMillis() - 90L * 24 * 3600 * 1000
-        val found = mutableListOf<Txn>()
-        contentResolver.query(Telephony.Sms.Inbox.CONTENT_URI,
-            arrayOf(Telephony.Sms.BODY, Telephony.Sms.DATE),
-            Telephony.Sms.DATE + " > ?", arrayOf(since.toString()), null)?.use {
-            while (it.moveToNext()) {
-                SmsParser.parse(it.getString(0) ?: "", it.getLong(1))?.let { x -> found.add(x) }
+            val open: (Txn) -> Unit = { edit = it; showForm = true }
+            when (tab) {
+                0 -> Home(shown, open)
+                1 -> TxnList(shown, open) {
+                    if (shown.isEmpty()) toast(ctx, "لا توجد عمليات في هذه الفترة")
+                    else { pdfBytes = PdfExport.build(shown, from, to); pdfLauncher.launch("qul-report.pdf") }
+                }
+                else -> MoreTab(all.size, { startImport() }) {
+                    toast(ctx, "تمت إزالة " + Store.dedupe(ctx) + " عملية مكررة"); reload()
+                }
             }
         }
-        val n = Store.addAll(this, found)
-        toast("تمت إضافة $n عملية")
-        refresh()
     }
 
-    override fun onRequestPermissionsResult(r: Int, p: Array<out String>, g: IntArray) {
-        if (g.isNotEmpty() && g.all { it == PackageManager.PERMISSION_GRANTED }) importOld()
+    if (showForm) {
+        TxnForm(edit, all, onDismiss = { showForm = false }, onSaved = { showForm = false; reload() })
     }
 }
 
-class BarsView(c: Context) : View(c) {
-    var inc = 0.0
-    var out = 0.0
-    private val p = Paint(Paint.ANTI_ALIAS_FLAG)
-    override fun onDraw(cv: Canvas) {
-        val w = width.toFloat(); val h = height.toFloat()
-        val max = maxOf(inc, out, 1.0)
-        val bw = w / 4f
-        val base = h - 44f
-        val items = listOf(Triple("الدخل", inc, GREEN), Triple("المصروف", out, RED))
-        items.forEachIndexed { i, (name, v, col) ->
-            val left = w * (0.15f + i * 0.45f)
-            val bh = ((v / max) * (base - 40f)).toFloat()
-            p.color = col
-            cv.drawRect(left, base - bh, left + bw, base, p)
-            p.color = Color.GRAY; p.textSize = 30f; p.textAlign = Paint.Align.CENTER
-            cv.drawText(name, left + bw / 2, h - 8f, p)
-            cv.drawText("%,.0f".format(v), left + bw / 2, base - bh - 10f, p)
+@Composable
+fun FilterBar(from: Long, to: Long, onShift: (Int) -> Unit, onFrom: () -> Unit, onTo: () -> Unit) {
+    val df = remember { SimpleDateFormat("yyyy/MM/dd", Locale.US) }
+    val mf = remember { SimpleDateFormat("MMMM yyyy", Locale.forLanguageTag("ar-u-nu-latn-ca-gregory")) }
+    val isMonth = monthStart(from) == from && monthEnd(from) == to
+    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween) {
+            TextButton(onClick = { onShift(-1) }) { Text("السابق") }
+            Text(if (isMonth) mf.format(Date(from)) else "فترة مخصصة",
+                fontWeight = FontWeight.Bold, fontSize = 17.sp)
+            TextButton(onClick = { onShift(1) }) { Text("التالي") }
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = onFrom, modifier = Modifier.weight(1f)) { Text("من: " + df.format(Date(from))) }
+            OutlinedButton(onClick = onTo, modifier = Modifier.weight(1f)) { Text("إلى: " + df.format(Date(to))) }
         }
     }
 }
 
-class TopView(c: Context) : View(c) {
-    private var rows: List<Pair<String, Double>> = emptyList()
-    private val p = Paint(Paint.ANTI_ALIAS_FLAG)
-    fun update(r: List<Pair<String, Double>>) { rows = r; invalidate() }
-    override fun onDraw(cv: Canvas) {
-        val w = width.toFloat()
-        val max = rows.maxOfOrNull { it.second } ?: 1.0
-        rows.forEachIndexed { i, (n, v) ->
-            val y = i * 76f
-            p.color = Color.GRAY; p.textSize = 28f
-            p.textAlign = Paint.Align.RIGHT
-            cv.drawText(n.take(24), w - 4f, y + 28f, p)
-            p.textAlign = Paint.Align.LEFT
-            cv.drawText("%,.0f".format(v), 4f, y + 28f, p)
-            p.color = RED
-            val bw = ((v / max) * (w - 8f)).toFloat()
-            cv.drawRect(w - 4f - bw, y + 38f, w - 4f, y + 56f, p)
+@Composable
+fun Home(list: List<Txn>, onOpen: (Txn) -> Unit) {
+    val inc = list.filter { it.income }.sumOf { it.amount }
+    val out = list.filter { !it.income }.sumOf { it.amount }
+    val byCat = list.filter { !it.income }.groupBy { it.cat }
+        .map { Pair(Cats.get(it.key), it.value.sumOf { x -> x.amount }) }
+        .sortedByDescending { it.second }
+    LazyColumn(contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        item {
+            Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.primaryContainer)) {
+                Column(Modifier.padding(16.dp)) {
+                    Text("الصافي")
+                    Text(money(inc - out), fontSize = 32.sp, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(8.dp))
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("الدخل  " + money(inc), color = GREEN, fontWeight = FontWeight.SemiBold)
+                        Text("المصروف  " + money(out), color = RED, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+            }
         }
+        item { DonutCard(byCat, out) }
+        item { Text("آخر العمليات", fontWeight = FontWeight.Bold, fontSize = 16.sp) }
+        if (list.isEmpty()) item { EmptyState() }
+        items(list.take(5), key = { it.id }) { TxnRow(it, onOpen) }
+        item { Spacer(Modifier.height(72.dp)) }
+    }
+}
+
+@Composable
+fun DonutCard(byCat: List<Pair<Cat, Double>>, total: Double) {
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp)) {
+            Text("المصروف حسب التصنيف", fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(12.dp))
+            if (total <= 0.0) {
+                Text("لا مصروفات في هذه الفترة", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+            } else {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(140.dp), contentAlignment = Alignment.Center) {
+                        Canvas(Modifier.fillMaxSize()) {
+                            val sw = 28.dp.toPx()
+                            var start = -90f
+                            byCat.forEach { (c, v) ->
+                                val sweep = (v / total * 360.0).toFloat()
+                                drawArc(c.color, start, sweep, false,
+                                    topLeft = Offset(sw / 2, sw / 2),
+                                    size = Size(size.width - sw, size.height - sw),
+                                    style = Stroke(sw))
+                                start += sweep
+                            }
+                        }
+                        Text("%,.0f".format(Locale.US, total), fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    }
+                    Spacer(Modifier.width(16.dp))
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        byCat.take(6).forEach { (c, v) ->
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(Modifier.size(10.dp).clip(CircleShape).background(c.color))
+                                Spacer(Modifier.width(6.dp))
+                                Text(c.icon + " " + c.name, Modifier.weight(1f), fontSize = 13.sp)
+                                Text((v / total * 100).toInt().toString() + "%", fontSize = 13.sp)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun TxnRow(t: Txn, onOpen: (Txn) -> Unit) {
+    val cat = Cats.get(t.cat)
+    val df = remember { SimpleDateFormat("yyyy/MM/dd", Locale.US) }
+    Card(onClick = { onOpen(t) }, modifier = Modifier.fillMaxWidth()) {
+        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(42.dp).clip(CircleShape).background(cat.color.copy(alpha = 0.18f)),
+                contentAlignment = Alignment.Center) { Text(cat.icon, fontSize = 20.sp) }
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(t.merchant, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.SemiBold)
+                Text(cat.name + " • " + df.format(Date(t.time)), fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+            }
+            Text("\u200E" + (if (t.income) "+" else "-") + money(t.amount),
+                color = if (t.income) GREEN else RED, fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+@Composable
+fun EmptyState() {
+    Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
+        Text("لا توجد عمليات في هذه الفترة.\nاضغط ＋ لإضافة عملية، أو استورد رسائل البنك من «المزيد».",
+            textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+    }
+}
+
+@Composable
+fun TxnList(list: List<Txn>, onOpen: (Txn) -> Unit, onPdf: () -> Unit) {
+    var q by remember { mutableStateOf("") }
+    var catF by remember { mutableStateOf("") }
+    val f = list.filter {
+        (catF.isEmpty() || it.cat == catF) &&
+            (q.isBlank() || it.merchant.contains(q, true) || Cats.get(it.cat).name.contains(q))
+    }
+    Column {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(q, { q = it }, Modifier.weight(1f), singleLine = true,
+                placeholder = { Text("بحث بالاسم أو التصنيف") })
+            TextButton(onClick = onPdf) { Text("📄 PDF") }
+        }
+        Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilterChip(catF.isEmpty(), { catF = "" }, label = { Text("الكل") })
+            Cats.all.forEach { c ->
+                FilterChip(catF == c.id, { catF = if (catF == c.id) "" else c.id },
+                    label = { Text(c.icon + " " + c.name) })
+            }
+        }
+        LazyColumn(contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (f.isEmpty()) item { EmptyState() }
+            items(f, key = { it.id }) { TxnRow(it, onOpen) }
+            item { Spacer(Modifier.height(72.dp)) }
+        }
+    }
+}
+
+@Composable
+fun MoreTab(count: Int, onImport: () -> Unit, onDedupe: () -> Unit) {
+    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text("المزيد", fontSize = 22.sp, fontWeight = FontWeight.Bold)
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("رسائل البنك", fontWeight = FontWeight.Bold)
+                Text("التطبيق يلتقط رسائل البنك الجديدة تلقائياً. ويمكنك استيراد رسائل آخر 90 يوماً.")
+                Button(onClick = onImport, modifier = Modifier.fillMaxWidth()) { Text("📥 استيراد رسائل آخر 90 يوم") }
+            }
+        }
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("العمليات المكررة", fontWeight = FontWeight.Bold)
+                Text("التطبيق لا يضيف نفس الرسالة مرتين. اضغط هنا لتنظيف أي تكرار قديم.")
+                OutlinedButton(onClick = onDedupe, modifier = Modifier.fillMaxWidth()) { Text("🧹 إزالة المكرر") }
+            }
+        }
+        Text("عدد العمليات المخزنة: $count", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+        Text("كل بياناتك محفوظة على جوالك فقط ولا تُرسل لأي جهة.",
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+    }
+}
+
+@Composable
+fun TxnForm(ex: Txn?, all: List<Txn>, onDismiss: () -> Unit, onSaved: () -> Unit) {
+    val ctx = LocalContext.current
+    val df = remember { SimpleDateFormat("yyyy/MM/dd", Locale.US) }
+    var name by remember { mutableStateOf(ex?.merchant ?: "") }
+    var amt by remember {
+        mutableStateOf(ex?.amount?.let { if (it % 1.0 == 0.0) it.toLong().toString() else it.toString() } ?: "")
+    }
+    var income by remember { mutableStateOf(ex?.income ?: false) }
+    var cat by remember { mutableStateOf(ex?.cat ?: "other") }
+    var time by remember { mutableLongStateOf(ex?.time ?: System.currentTimeMillis()) }
+    var picked by remember { mutableStateOf(false) }
+    var dupAsk by remember { mutableStateOf(false) }
+
+    fun save(force: Boolean) {
+        val a = amt.replace(',', '.').toDoubleOrNull()
+        if (a == null || a <= 0) { toast(ctx, "المبلغ غير صحيح"); return }
+        val n = name.trim().ifEmpty { "بدون اسم" }
+        val c = if (income) "income" else cat
+        val t = Txn(ex?.id ?: ("m-" + UUID.randomUUID()), a, income, n, time, ex?.raw ?: "", c)
+        if (ex == null && !force && Dups.similarManual(all, t)) { dupAsk = true; return }
+        Store.put(ctx, t)
+        if (picked && !income && n != "بدون اسم") Store.learn(ctx, n, c)
+        onSaved()
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (ex == null) "إضافة عملية" else "تعديل العملية") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(name, {
+                    name = it
+                    if (!picked && ex == null) cat = Cats.guess(it, false)
+                }, label = { Text("اسم العملية") }, singleLine = true)
+                OutlinedTextField(amt, { amt = it }, label = { Text("المبلغ") }, singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(!income, { income = false }, label = { Text("مصروف") })
+                    FilterChip(income, { income = true }, label = { Text("دخل") })
+                }
+                if (!income) {
+                    Row(Modifier.horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Cats.all.filter { it.id != "income" }.forEach { c ->
+                            FilterChip(cat == c.id, { cat = c.id; picked = true },
+                                label = { Text(c.icon + " " + c.name) })
+                        }
+                    }
+                }
+                OutlinedButton(onClick = { pick(ctx, time) { time = it } }) {
+                    Text("التاريخ: " + df.format(Date(time)))
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = { save(false) }) { Text("حفظ") } },
+        dismissButton = {
+            Row {
+                if (ex != null) TextButton(onClick = { Store.remove(ctx, ex.id); onSaved() }) {
+                    Text("حذف", color = RED)
+                }
+                TextButton(onClick = onDismiss) { Text("إلغاء") }
+            }
+        }
+    )
+
+    if (dupAsk) {
+        AlertDialog(
+            onDismissRequest = { dupAsk = false },
+            title = { Text("عملية مشابهة") },
+            text = { Text("توجد عملية بنفس المبلغ والنوع في نفس اليوم. هل تضيفها مرة ثانية؟") },
+            confirmButton = { TextButton(onClick = { dupAsk = false; save(true) }) { Text("أضف") } },
+            dismissButton = { TextButton(onClick = { dupAsk = false }) { Text("إلغاء") } }
+        )
     }
 }
