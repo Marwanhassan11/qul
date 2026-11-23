@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
@@ -117,11 +118,11 @@ fun importSms(ctx: Context): Int {
     val found = mutableListOf<Txn>()
     ctx.contentResolver.query(
         Telephony.Sms.Inbox.CONTENT_URI,
-        arrayOf(Telephony.Sms.BODY, Telephony.Sms.DATE),
+        arrayOf(Telephony.Sms.BODY, Telephony.Sms.DATE, Telephony.Sms.ADDRESS),
         Telephony.Sms.DATE + " > ?", arrayOf(since.toString()), null
     )?.use { cur ->
         while (cur.moveToNext()) {
-            SmsParser.parse(cur.getString(0) ?: "", cur.getLong(1))?.let { found.add(it) }
+            SmsParser.parse(cur.getString(0) ?: "", cur.getLong(1), cur.getString(2) ?: "")?.let { found.add(it) }
         }
     }
     return Store.addAll(ctx, found)
@@ -201,7 +202,7 @@ fun App() {
                         Store.resetAuto(ctx)
                         toast(ctx, "أعيدت قراءة الرسائل: " + importSms(ctx) + " عملية"); reload()
                     } else permLauncher.launch(perms)
-                }) {
+                }, { reload() }) {
                     toast(ctx, "تمت إزالة " + Store.dedupe(ctx) + " عملية مكررة"); reload()
                 }
             }
@@ -322,7 +323,7 @@ fun TxnRow(t: Txn, onOpen: (Txn) -> Unit) {
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text(t.merchant, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.SemiBold)
-                Text(cat.name + " • " + df.format(Date(t.time)), fontSize = 12.sp,
+                Text(cat.name + " • " + df.format(Date(t.time)) + (if (t.src.isNotEmpty() && t.src != t.merchant) " • " + t.src else ""), fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
             }
             Text("\u200E" + (if (t.income) "+" else "-") + money(t.amount),
@@ -403,8 +404,11 @@ fun TxnList(list: List<Txn>, onOpen: (Txn) -> Unit, onPdf: () -> Unit) {
 }
 
 @Composable
-fun MoreTab(count: Int, onImport: () -> Unit, onReread: () -> Unit, onDedupe: () -> Unit) {
+fun MoreTab(count: Int, onImport: () -> Unit, onReread: () -> Unit, onMine: () -> Unit, onDedupe: () -> Unit) {
+    val ctx = LocalContext.current
     var askReread by remember { mutableStateOf(false) }
+    var mine by remember { mutableStateOf(Store.mineList(ctx)) }
+    var kw by remember { mutableStateOf("") }
     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("المزيد", fontSize = 22.sp, fontWeight = FontWeight.Bold)
         Card(Modifier.fillMaxWidth()) {
@@ -412,6 +416,30 @@ fun MoreTab(count: Int, onImport: () -> Unit, onReread: () -> Unit, onDedupe: ()
                 Text("رسائل البنك", fontWeight = FontWeight.Bold)
                 Text("التطبيق يلتقط رسائل البنك الجديدة تلقائياً. ويمكنك استيراد رسائل آخر 90 يوماً.")
                 Button(onClick = onImport, modifier = Modifier.fillMaxWidth()) { Text("📥 استيراد رسائل آخر 90 يوم") }
+            }
+        }
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("حساباتي (تحويلات بين حساباتك)", fontWeight = FontWeight.Bold)
+                Text("اكتب اسمك أو آخر أرقام حساباتك كما تظهر في رسائل التحويل. أي تحويل فيه كلمة منها يُعتبر تحويلاً بين حساباتك ولا يُحسب دخلاً ولا مصروفاً. باقي التحويلات تُحسب دخلاً أو مصروفاً عادياً.")
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(kw, { kw = it }, Modifier.weight(1f), singleLine = true,
+                        placeholder = { Text("مثال: MARWAN") })
+                    Button(onClick = {
+                        val k = kw.trim()
+                        if (k.length >= 2 && mine.none { it.equals(k, true) }) {
+                            mine = mine + k
+                            Store.setMine(ctx, mine)
+                            val n = Store.applyMine(ctx)
+                            toast(ctx, "تم. صُنّفت $n عملية كتحويل بين حساباتك")
+                            kw = ""
+                            onMine()
+                        }
+                    }) { Text("إضافة") }
+                }
+                mine.forEach { k ->
+                    TextButton(onClick = { mine = mine - k; Store.setMine(ctx, mine); onMine() }) { Text("✕  $k") }
+                }
             }
         }
         Card(Modifier.fillMaxWidth()) {
@@ -460,10 +488,10 @@ fun TxnForm(ex: Txn?, all: List<Txn>, onDismiss: () -> Unit, onSaved: () -> Unit
         if (a == null || a <= 0) { toast(ctx, "المبلغ غير صحيح"); return }
         val n = name.trim().ifEmpty { "بدون اسم" }
         val c = if (income && cat != "transfer") "income" else cat
-        val t = Txn(ex?.id ?: ("m-" + UUID.randomUUID()), a, income, n, time, ex?.raw ?: "", c)
+        val t = Txn(ex?.id ?: ("m-" + UUID.randomUUID()), a, income, n, time, ex?.raw ?: "", c, ex?.src ?: "")
         if (ex == null && !force && Dups.similarManual(all, t)) { dupAsk = true; return }
         Store.put(ctx, t)
-        if (picked && !income && n != "بدون اسم") Store.learn(ctx, n, c)
+        if (picked && n != "بدون اسم" && (!income || c == "transfer")) Store.learn(ctx, n, c)
         onSaved()
     }
 
@@ -471,7 +499,7 @@ fun TxnForm(ex: Txn?, all: List<Txn>, onDismiss: () -> Unit, onSaved: () -> Unit
         onDismissRequest = onDismiss,
         title = { Text(if (ex == null) "إضافة عملية" else "تعديل العملية") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(name, {
                     name = it
                     if (!picked && ex == null) cat = Cats.guess(it, false)
@@ -493,6 +521,11 @@ fun TxnForm(ex: Txn?, all: List<Txn>, onDismiss: () -> Unit, onSaved: () -> Unit
                 }
                 OutlinedButton(onClick = { pick(ctx, time) { time = it } }) {
                     Text("التاريخ: " + df.format(Date(time)))
+                }
+                if (ex != null && ex.raw.isNotEmpty()) {
+                    Text("نص الرسالة" + (if (ex.src.isNotEmpty()) " (" + ex.src + ")" else ""),
+                        fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Text(ex.raw, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
                 }
             }
         },

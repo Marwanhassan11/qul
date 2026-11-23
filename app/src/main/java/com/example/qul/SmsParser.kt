@@ -5,7 +5,7 @@ import kotlin.math.abs
 
 data class Txn(val id: String, val amount: Double, val income: Boolean,
                val merchant: String, val time: Long, val raw: String,
-               val cat: String = "other")
+               val cat: String = "other", val src: String = "")
 
 object SmsParser {
     private val I = RegexOption.IGNORE_CASE
@@ -19,6 +19,7 @@ object SmsParser {
     private val amt2 = Regex("(\\d[\\d,]*(?:\\.\\d+)?)\\s*(?:SAR|SR|ر\\.?\\s?س|ريال)", I)
     private val shopRe = Regex("(?:لدى|عند|at|Merchant|المتجر)\\s*[:：]?\\s*([^\\n\\r]{2,60})", I)
     private val fromLine = Regex("^\\s*من(?:\\s*[:：]\\s*|\\s+)(.+?)\\s*$")
+    private val toLine = Regex("^\\s*(?:الى|إلى|المستفيد|اسم المستفيد|المرسل|To|Beneficiary|Sender)\\s*[:：]\\s*(.+?)\\s*$", I)
     private val onlyDigits = Regex("[*\\d\\s]+")
     private val ymd = Regex("(?<!\\d)(\\d{4})-(\\d{1,2})-(\\d{1,2})(?!\\d)")
     private val dmy = Regex("(?<!\\d)(\\d{1,2})-(\\d{1,2})-(\\d{2,4})\\s+(\\d{1,2}):(\\d{2})")
@@ -40,6 +41,11 @@ object SmsParser {
             if (v.startsWith("حساب") || v.startsWith("بطاق") || onlyDigits.matches(v)) continue
             val clean = v.trimEnd('.', ' ', ':')
             if (clean.isNotEmpty()) return clean
+        }
+        for (line in s.lines()) {
+            val m = toLine.find(line) ?: continue
+            val clean = m.groupValues[1].trim().trimEnd('.', ' ', ':')
+            if (clean.isNotEmpty() && !onlyDigits.matches(clean)) return clean
         }
         return null
     }
@@ -70,7 +76,9 @@ object SmsParser {
         return c.timeInMillis
     }
 
-    fun parse(body: String, time: Long): Txn? {
+    fun isTransferMsg(raw: String) = transferRe.containsMatchIn(raw) && !purchaseRe.containsMatchIn(raw)
+
+    fun parse(body: String, time: Long, src: String = ""): Txn? {
         val s = norm(body)
         if (skip.containsMatchIn(s)) return null
         val inc = incomeRe.containsMatchIn(s)
@@ -80,12 +88,10 @@ object SmsParser {
         val m = amt1.find(s2) ?: amt2.find(s2) ?: return null
         val amount = m.groupValues[1].replace(",", "").toDoubleOrNull() ?: return null
         if (amount <= 0) return null
-        val merchant = (merchantFromLines(s2) ?: merchantLegacy(s2)).ifEmpty { "بنك" }
+        val merchant = (merchantFromLines(s2) ?: merchantLegacy(s2)).ifEmpty { src.ifEmpty { "بنك" } }
         val isIncome = inc && !exp
         val parsed = try { whenOf(s2) } catch (e: Exception) { null }
         val t = parsed?.takeIf { abs(it - time) < 3 * 86_400_000L } ?: time
-        val cat = if (transferRe.containsMatchIn(s) && !purchaseRe.containsMatchIn(s)) "transfer"
-        else Cats.guess(merchant, isIncome)
-        return Txn("$t-${body.hashCode()}", amount, isIncome, merchant, t, body, cat)
+        return Txn("$t-${body.hashCode()}", amount, isIncome, merchant, t, body, Cats.guess(merchant, isIncome), src)
     }
 }

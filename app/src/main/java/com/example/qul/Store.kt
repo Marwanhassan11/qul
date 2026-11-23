@@ -62,18 +62,21 @@ object Store {
             val inc = o.getBoolean("i")
             val m = o.getString("m")
             Txn(o.getString("id"), o.getDouble("a"), inc, m, o.getLong("t"), o.getString("r"),
-                o.optString("c", "").ifEmpty { Cats.guess(m, inc) })
+                o.optString("c", "").ifEmpty { Cats.guess(m, inc) }, o.optString("s", ""))
         }.sortedByDescending { it.time }
     }
 
     @Synchronized fun addAll(c: Context, ts: List<Txn>): Int {
         val cur = all(c).toMutableList()
         val r = rules(c)
+        val own = mineList(c)
         var n = 0
         var changed = false
         for (t0 in ts) {
             val learned = r.optString(t0.merchant.lowercase(), "")
-            val t = if (learned.isNotEmpty() && !t0.income) t0.copy(cat = learned) else t0
+            val t1 = if (learned.isNotEmpty() && (!t0.income || learned == "transfer")) t0.copy(cat = learned) else t0
+            val t = if (t1.cat != "transfer" && SmsParser.isTransferMsg(t1.raw) &&
+                own.any { k -> t1.raw.contains(k, true) }) t1.copy(cat = "transfer") else t1
             if (Dups.isDup(cur, t)) continue
             // عملية أُدخلت يدوياً بنفس المبلغ ثم وصلت رسالتها: ندمجهما بدل التكرار
             val mi = cur.indexOfFirst {
@@ -99,7 +102,7 @@ object Store {
         r.put(merchant.lowercase(), cat)
         sp(c).edit().putString("rules", r.toString()).apply()
         save(c, all(c).map {
-            if (!it.income && it.merchant.equals(merchant, ignoreCase = true)) it.copy(cat = cat) else it
+            if ((!it.income || cat == "transfer") && it.merchant.equals(merchant, ignoreCase = true)) it.copy(cat = cat) else it
         })
     }
 
@@ -117,11 +120,33 @@ object Store {
         save(c, all(c).filter { it.raw.isEmpty() || it.id.startsWith("m-") })
     }
 
+    fun mineList(c: Context): List<String> {
+        val a = JSONArray(sp(c).getString("mine", "[]") ?: "[]")
+        return (0 until a.length()).map { a.getString(it) }
+    }
+
+    fun setMine(c: Context, l: List<String>) {
+        sp(c).edit().putString("mine", JSONArray(l).toString()).apply()
+    }
+
+    /** يصنّف تحويلات حساباتي (حسب الكلمات المحفوظة) ويرجع عددها. */
+    @Synchronized fun applyMine(c: Context): Int {
+        val own = mineList(c)
+        if (own.isEmpty()) return 0
+        var n = 0
+        save(c, all(c).map { t ->
+            if (t.cat != "transfer" && SmsParser.isTransferMsg(t.raw) && own.any { k -> t.raw.contains(k, true) }) {
+                n++; t.copy(cat = "transfer")
+            } else t
+        })
+        return n
+    }
+
     private fun save(c: Context, l: List<Txn>) {
         val a = JSONArray()
         l.forEach {
             a.put(JSONObject().put("id", it.id).put("a", it.amount).put("i", it.income)
-                .put("m", it.merchant).put("t", it.time).put("r", it.raw).put("c", it.cat))
+                .put("m", it.merchant).put("t", it.time).put("r", it.raw).put("c", it.cat).put("s", it.src))
         }
         sp(c).edit().putString("tx", a.toString()).apply()
     }

@@ -12,6 +12,6 @@ class SmsReceiver : BroadcastReceiver() {
         if (msgs.isNullOrEmpty()) return
         val body = msgs.joinToString("") { it.messageBody ?: "" }
         val t = if (msgs[0].timestampMillis > 0) msgs[0].timestampMillis else System.currentTimeMillis()
-        SmsParser.parse(body, t)?.let { Store.addAll(c, listOf(it)) }
+        SmsParser.parse(body, t, msgs[0].originatingAddress ?: "")?.let { Store.addAll(c, listOf(it)) }
     }
 }
