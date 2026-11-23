@@ -301,7 +301,7 @@ fun DonutCard(byCat: List<Pair<Cat, Double>>, total: Double) {
                                 Box(Modifier.size(10.dp).clip(CircleShape).background(c.color))
                                 Spacer(Modifier.width(6.dp))
                                 Text(c.icon + " " + c.name, Modifier.weight(1f), fontSize = 13.sp)
-                                Text((v / total * 100).toInt().toString() + "%", fontSize = 13.sp)
+                                Text((v / total * 100).let { if (it > 0 && it < 1) "<1%" else it.toInt().toString() + "%" }, fontSize = 13.sp)
                             }
                         }
                     }

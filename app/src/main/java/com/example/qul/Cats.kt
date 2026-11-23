@@ -22,12 +22,12 @@ object Cats {
     private val I = RegexOption.IGNORE_CASE
     private val rules: List<Pair<String, Regex>> = listOf(
         "transfer" to Regex("حواله|تحويل|ايبان|iban|transfer|remit|western union|stc pay|urpay|sarie", I),
-        "food" to Regex("اكل|غدا|عشا|فطور|مطعم|قهو|كافيه|بقال|سوبر|ماركت|شاورما|برجر|بيتزا|عصير|مخبز|حلا|starbucks|coffee|cafe|restaurant|kfc|mcdonald|burger|pizza|bakery|panda|danube|othaim|tamimi|lulu|carrefour|hungerstation|jahez|mrsool|talabat|dunkin|tim hortons|albaik|baik", I),
-        "transport" to Regex("بنزين|وقود|اوبر|كريم|تاكسي|مواصلات|مترو|موقف|ديزل|uber|careem|taxi|petrol|fuel|aramco|sasco|adnoc|enoc|shell|parking|bolt|metro", I),
+        "food" to Regex("hyper|اكل|غدا|عشا|فطور|مطعم|قهو|كافيه|بقال|سوبر|ماركت|شاورما|برجر|بيتزا|عصير|مخبز|حلا|starbucks|coffee|cafe|restaurant|kfc|mcdonald|burger|pizza|bakery|panda|danube|othaim|tamimi|lulu|carrefour|hungerstation|jahez|mrsool|talabat|dunkin|tim hortons|albaik|baik", I),
+        "transport" to Regex("saptco|بنزين|وقود|اوبر|كريم|تاكسي|مواصلات|مترو|موقف|ديزل|uber|careem|taxi|petrol|fuel|aramco|sasco|adnoc|enoc|shell|parking|bolt|metro", I),
         "bills" to Regex("فاتور|كهرباء|مويه|انترنت|اتصالات|ايجار|قسط|اقساط|تامين|سداد|stc|mobily|zain|electric|water|internet|rent|insurance|sadad|bill|utility|telecom", I),
         "shop" to Regex("ملابس|تسوق|امازون|نون|هديه|جرير|اكسترا|amazon|noon|shein|ikea|jarir|extra|zara|h&m|mall|namshi|temu", I),
         "health" to Regex("دواء|صيدل|دكتور|مستشفي|مستشفى|عياده|مختبر|تحليل|pharmacy|nahdi|dawaa|hospital|clinic|medical", I),
-        "fun" to Regex("سينما|نتفلكس|العاب|ترفيه|رحله|سفر|فندق|طيران|netflix|spotify|cinema|vox|steam|playstation|xbox|youtube|apple\\.com|google play|shahid|booking|airline|flynas|saudia", I)
+        "fun" to Regex("tiktok|tik tok|google tik|سينما|نتفلكس|العاب|ترفيه|رحله|سفر|فندق|طيران|netflix|spotify|cinema|vox|steam|playstation|xbox|youtube|apple\\.com|google play|shahid|booking|airline|flynas|saudia", I)
     )
 
     private fun norm(s: String) = s.replace(Regex("[أإآ]"), "ا").replace("ة", "ه").replace("ى", "ي")
