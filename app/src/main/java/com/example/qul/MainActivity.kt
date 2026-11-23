@@ -196,7 +196,12 @@ fun App() {
                     if (shown.isEmpty()) toast(ctx, "لا توجد عمليات في هذه الفترة")
                     else { pdfBytes = PdfExport.build(shown, from, to); pdfLauncher.launch("qul-report.pdf") }
                 }
-                else -> MoreTab(all.size, { startImport() }) {
+                else -> MoreTab(all.size, { startImport() }, {
+                    if (granted()) {
+                        Store.resetAuto(ctx)
+                        toast(ctx, "أعيدت قراءة الرسائل: " + importSms(ctx) + " عملية"); reload()
+                    } else permLauncher.launch(perms)
+                }) {
                     toast(ctx, "تمت إزالة " + Store.dedupe(ctx) + " عملية مكررة"); reload()
                 }
             }
@@ -230,9 +235,11 @@ fun FilterBar(from: Long, to: Long, onShift: (Int) -> Unit, onFrom: () -> Unit, 
 
 @Composable
 fun Home(list: List<Txn>, onOpen: (Txn) -> Unit) {
-    val inc = list.filter { it.income }.sumOf { it.amount }
-    val out = list.filter { !it.income }.sumOf { it.amount }
-    val byCat = list.filter { !it.income }.groupBy { it.cat }
+    val real = list.filter { it.cat != "transfer" }
+    val trCount = list.size - real.size
+    val inc = real.filter { it.income }.sumOf { it.amount }
+    val out = real.filter { !it.income }.sumOf { it.amount }
+    val byCat = real.filter { !it.income }.groupBy { it.cat }
         .map { Pair(Cats.get(it.key), it.value.sumOf { x -> x.amount }) }
         .sortedByDescending { it.second }
     LazyColumn(contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -241,11 +248,15 @@ fun Home(list: List<Txn>, onOpen: (Txn) -> Unit) {
                 containerColor = MaterialTheme.colorScheme.primaryContainer)) {
                 Column(Modifier.padding(16.dp)) {
                     Text("الصافي")
-                    Text(money(inc - out), fontSize = 32.sp, fontWeight = FontWeight.Bold)
+                    Text("\u200E" + money(inc - out), fontSize = 32.sp, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(8.dp))
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text("الدخل  " + money(inc), color = GREEN, fontWeight = FontWeight.SemiBold)
                         Text("المصروف  " + money(out), color = RED, fontWeight = FontWeight.SemiBold)
+                    }
+                    if (trCount > 0) {
+                        Spacer(Modifier.height(6.dp))
+                        Text("🔁 $trCount عملية تحويل بين حساباتك غير محسوبة في الدخل والمصروف", fontSize = 12.sp)
                     }
                 }
             }
@@ -331,24 +342,57 @@ fun EmptyState() {
 @Composable
 fun TxnList(list: List<Txn>, onOpen: (Txn) -> Unit, onPdf: () -> Unit) {
     var q by remember { mutableStateOf("") }
+    var type by remember { mutableIntStateOf(0) }
     var catF by remember { mutableStateOf("") }
+    var sort by remember { mutableIntStateOf(0) }
+    val present = list.map { it.cat }.toSet()
     val f = list.filter {
-        (catF.isEmpty() || it.cat == catF) &&
-            (q.isBlank() || it.merchant.contains(q, true) || Cats.get(it.cat).name.contains(q))
+        val tr = it.cat == "transfer"
+        (type == 0 || (type == 1 && !it.income && !tr) || (type == 2 && it.income && !tr) || (type == 3 && tr)) &&
+            (catF.isEmpty() || it.cat == catF) &&
+            (q.isBlank() || it.merchant.contains(q, true) || Cats.get(it.cat).name.contains(q) ||
+                money(it.amount).contains(q))
+    }.let {
+        when (sort) {
+            1 -> it.sortedBy { x -> x.time }
+            2 -> it.sortedByDescending { x -> x.amount }
+            else -> it.sortedByDescending { x -> x.time }
+        }
     }
+    val real = f.filter { it.cat != "transfer" }
+    val sIn = real.filter { it.income }.sumOf { it.amount }
+    val sOut = real.filter { !it.income }.sumOf { it.amount }
+    val active = type != 0 || catF.isNotEmpty() || q.isNotBlank() || sort != 0
     Column {
         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             OutlinedTextField(q, { q = it }, Modifier.weight(1f), singleLine = true,
-                placeholder = { Text("بحث بالاسم أو التصنيف") })
+                placeholder = { Text("بحث بالاسم أو التصنيف أو المبلغ") })
             TextButton(onClick = onPdf) { Text("📄 PDF") }
+        }
+        Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf("الكل", "مصروف", "دخل", "🔁 تحويلات").forEachIndexed { i, l ->
+                FilterChip(type == i, { type = i }, label = { Text(l) })
+            }
+        }
+        Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf("الأحدث", "الأقدم", "الأعلى مبلغاً").forEachIndexed { i, l ->
+                FilterChip(sort == i, { sort = i }, label = { Text("↕ $l") })
+            }
         }
         Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 4.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FilterChip(catF.isEmpty(), { catF = "" }, label = { Text("الكل") })
-            Cats.all.forEach { c ->
+            Cats.all.filter { it.id in present }.forEach { c ->
                 FilterChip(catF == c.id, { catF = if (catF == c.id) "" else c.id },
                     label = { Text(c.icon + " " + c.name) })
             }
+        }
+        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("${f.size} عملية  •  دخل " + money(sIn) + "  •  مصروف " + money(sOut),
+                fontSize = 12.sp, modifier = Modifier.weight(1f),
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+            if (active) TextButton(onClick = { q = ""; type = 0; catF = ""; sort = 0 }) { Text("مسح الفلاتر") }
         }
         LazyColumn(contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             if (f.isEmpty()) item { EmptyState() }
@@ -359,7 +403,8 @@ fun TxnList(list: List<Txn>, onOpen: (Txn) -> Unit, onPdf: () -> Unit) {
 }
 
 @Composable
-fun MoreTab(count: Int, onImport: () -> Unit, onDedupe: () -> Unit) {
+fun MoreTab(count: Int, onImport: () -> Unit, onReread: () -> Unit, onDedupe: () -> Unit) {
+    var askReread by remember { mutableStateOf(false) }
     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("المزيد", fontSize = 22.sp, fontWeight = FontWeight.Bold)
         Card(Modifier.fillMaxWidth()) {
@@ -367,6 +412,13 @@ fun MoreTab(count: Int, onImport: () -> Unit, onDedupe: () -> Unit) {
                 Text("رسائل البنك", fontWeight = FontWeight.Bold)
                 Text("التطبيق يلتقط رسائل البنك الجديدة تلقائياً. ويمكنك استيراد رسائل آخر 90 يوماً.")
                 Button(onClick = onImport, modifier = Modifier.fillMaxWidth()) { Text("📥 استيراد رسائل آخر 90 يوم") }
+            }
+        }
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("إعادة قراءة الرسائل", fontWeight = FontWeight.Bold)
+                Text("بعد كل تحديث للتطبيق، أعد قراءة الرسائل لتُطبَّق قواعد الأسماء والتصنيف والتحويلات الجديدة.")
+                OutlinedButton(onClick = { askReread = true }, modifier = Modifier.fillMaxWidth()) { Text("🔄 إعادة قراءة الرسائل") }
             }
         }
         Card(Modifier.fillMaxWidth()) {
@@ -379,6 +431,13 @@ fun MoreTab(count: Int, onImport: () -> Unit, onDedupe: () -> Unit) {
         Text("عدد العمليات المخزنة: $count", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
         Text("كل بياناتك محفوظة على جوالك فقط ولا تُرسل لأي جهة.",
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+        if (askReread) AlertDialog(
+            onDismissRequest = { askReread = false },
+            title = { Text("إعادة قراءة الرسائل") },
+            text = { Text("سيحذف العمليات المسجلة من الرسائل ويعيد قراءتها بالقواعد الحالية. العمليات التي أضفتها يدوياً لن تتأثر، لكن تعديلاتك على أسماء عمليات الرسائل ستضيع.") },
+            confirmButton = { TextButton(onClick = { askReread = false; onReread() }) { Text("متابعة") } },
+            dismissButton = { TextButton(onClick = { askReread = false }) { Text("إلغاء") } }
+        )
     }
 }
 
@@ -400,7 +459,7 @@ fun TxnForm(ex: Txn?, all: List<Txn>, onDismiss: () -> Unit, onSaved: () -> Unit
         val a = amt.replace(',', '.').toDoubleOrNull()
         if (a == null || a <= 0) { toast(ctx, "المبلغ غير صحيح"); return }
         val n = name.trim().ifEmpty { "بدون اسم" }
-        val c = if (income) "income" else cat
+        val c = if (income && cat != "transfer") "income" else cat
         val t = Txn(ex?.id ?: ("m-" + UUID.randomUUID()), a, income, n, time, ex?.raw ?: "", c)
         if (ex == null && !force && Dups.similarManual(all, t)) { dupAsk = true; return }
         Store.put(ctx, t)
@@ -420,13 +479,13 @@ fun TxnForm(ex: Txn?, all: List<Txn>, onDismiss: () -> Unit, onSaved: () -> Unit
                 OutlinedTextField(amt, { amt = it }, label = { Text("المبلغ") }, singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterChip(!income, { income = false }, label = { Text("مصروف") })
-                    FilterChip(income, { income = true }, label = { Text("دخل") })
+                    FilterChip(!income, { income = false; if (cat == "income") cat = "other" }, label = { Text("مصروف") })
+                    FilterChip(income, { income = true; if (cat != "transfer") cat = "income" }, label = { Text("دخل") })
                 }
-                if (!income) {
+                run {
                     Row(Modifier.horizontalScroll(rememberScrollState()),
                         horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Cats.all.filter { it.id != "income" }.forEach { c ->
+                        Cats.all.filter { if (income) (it.id == "income" || it.id == "transfer") else it.id != "income" }.forEach { c ->
                             FilterChip(cat == c.id, { cat = c.id; picked = true },
                                 label = { Text(c.icon + " " + c.name) })
                         }

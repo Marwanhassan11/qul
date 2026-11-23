@@ -34,8 +34,8 @@ object PdfExport {
             cv.drawLine(L, y + 6f, R, y + 6f, p)
             y += 26f
         }
-        val inc = list.filter { it.income }.sumOf { it.amount }
-        val out = list.filter { !it.income }.sumOf { it.amount }
+        val inc = list.filter { it.income && it.cat != "transfer" }.sumOf { it.amount }
+        val out = list.filter { !it.income && it.cat != "transfer" }.sumOf { it.amount }
         t("تقرير الإيرادات والمصروفات", R, y, 20f, Paint.Align.RIGHT, Color.BLACK, true); y += 28f
         t("الفترة", R, y, 12f, Paint.Align.RIGHT)
         t(df.format(Date(from)) + " - " + df.format(Date(to)), R - 50f, y, 12f, Paint.Align.RIGHT); y += 22f

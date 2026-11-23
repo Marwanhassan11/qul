@@ -29,6 +29,28 @@ object Dups {
     }
 }
 
+object Transfers {
+    private val kw = Regex("حوال|تحويل|ايبان|iban|transfer|sarie|urpay", RegexOption.IGNORE_CASE)
+
+    /** يربط التحويل الصادر بالوارد (نفس المبلغ خلال 6 ساعات) ويعتبرهما تحويلاً بين حساباتك. */
+    fun link(l: List<Txn>): List<Txn> {
+        val out = l.toMutableList()
+        for (i in out.indices) {
+            val a = out[i]
+            if (!a.income) continue
+            val j = out.indexOfFirst { b ->
+                !b.income && abs(b.amount - a.amount) < 0.005 &&
+                    abs(b.time - a.time) <= 6 * 3_600_000L &&
+                    !(a.cat == "transfer" && b.cat == "transfer") &&
+                    (a.cat == "transfer" || b.cat == "transfer" ||
+                        kw.containsMatchIn(a.raw) || kw.containsMatchIn(b.raw))
+            }
+            if (j >= 0) { out[i] = a.copy(cat = "transfer"); out[j] = out[j].copy(cat = "transfer") }
+        }
+        return out
+    }
+}
+
 object Store {
     private fun sp(c: Context) = c.getSharedPreferences("qul", Context.MODE_PRIVATE)
     private fun rules(c: Context) = JSONObject(sp(c).getString("rules", "{}") ?: "{}")
@@ -61,7 +83,7 @@ object Store {
             if (mi >= 0) { cur[mi] = cur[mi].copy(raw = t.raw); changed = true; continue }
             cur.add(t); n++; changed = true
         }
-        if (changed) save(c, cur)
+        if (changed) save(c, Transfers.link(cur))
         return n
     }
 
@@ -86,8 +108,13 @@ object Store {
         val keep = mutableListOf<Txn>()
         for (t in sorted) if (!Dups.isDup(keep, t)) keep.add(t)
         val removed = sorted.size - keep.size
-        if (removed > 0) save(c, keep)
+        save(c, Transfers.link(keep))
         return removed
+    }
+
+    /** يحذف العمليات المسجّلة من الرسائل (وتبقى اليدوية) ليعاد استيرادها بالقواعد الجديدة. */
+    @Synchronized fun resetAuto(c: Context) {
+        save(c, all(c).filter { it.raw.isEmpty() || it.id.startsWith("m-") })
     }
 
     private fun save(c: Context, l: List<Txn>) {
